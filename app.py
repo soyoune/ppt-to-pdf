@@ -4,8 +4,8 @@ import io
 from PIL import Image
 from pptx import Presentation
 
-st.title("PPT 이미지 투명 PDF 변환기")
-st.write("파워포인트 각 슬라이드의 여러 이미지 요소를 하나로 합성하여 투명 PDF로 변환해 드립니다.")
+st.title("PPT A4 스티커 배치 PDF 변환기")
+st.write("파워포인트 각 슬라이드의 여러 이미지를 A4 크기 레이아웃에 맞춰 정렬한 뒤 PDF로 변환합니다.")
 
 uploaded_file = st.file_uploader("PPTX 파일을 선택하세요", type=["pptx"])
 
@@ -16,19 +16,27 @@ if uploaded_file is not None:
     with open(ppt_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
         
-    st.success("파일 업로드 완료! 슬라이드별 이미지를 합성 중입니다...")
+    st.success("파일 업로드 완료! A4 규격에 맞춰 슬라이드를 변환 중입니다...")
     
     prs = Presentation(ppt_path)
     slide_pil_images = []
     
-    # 파워포인트 기본 슬라이드 크기 (16:9 기준, 픽셀 단위로 환산)
-    slide_width = int(prs.slide_width.inches * 96)
-    slide_height = int(prs.slide_height.inches * 96)
+    # A4 크기 (300 DPI 기준 약 2480 x 3508 또는 96 DPI 기준 약 794 x 1123)
+    # 여기서는 호환성을 위해 96 DPI 기준 A4 세로 크기 사용 (가로 794, 세로 1123)
+    a4_width = 794
+    a4_height = 1123
+    
+    prs_width = prs.slide_width.inches
+    prs_height = prs.slide_height.inches
     
     for slide in prs.slides:
-        # 투명 배경을 지원하는 빈 캔버스 생성 (RGBA 모드)
-        base_canvas = Image.new("RGBA", (slide_width, slide_height), (255, 255, 255, 0))
+        # A4 크기의 백색(또는 투명 대체용) 캔버스 생성
+        base_canvas = Image.new("RGBA", (a4_width, a4_height), (255, 255, 255, 255))
         image_found = False
+        
+        # PPT 슬라이드 비율 대비 A4 캔버스 내에서의 스케일 및 여백 계산
+        scale_x = a4_width / (prs_width * 96) if prs_width > 0 else 1
+        scale_y = a4_height / (prs_height * 96) if prs_height > 0 else 1
         
         # 1. 일반 그림 개체 합성
         for shape in slide.shapes:
@@ -37,16 +45,12 @@ if uploaded_file is not None:
                     img_bytes = shape.image.blob
                     img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
                     
-                    # PPT 내 위치 및 크기 계산 (인치 또는 파이썬-pptx 단위를 픽셀로 변환)
-                    left = int(shape.left.inches * 96)
-                    top = int(shape.top.inches * 96)
-                    width = int(shape.width.inches * 96)
-                    height = int(shape.height.inches * 96)
+                    left = int(shape.left.inches * 96 * scale_x)
+                    top = int(shape.top.inches * 96 * scale_y)
+                    width = int(shape.width.inches * 96 * scale_x)
+                    height = int(shape.height.inches * 96 * scale_y)
                     
-                    # 이미지 크기 조절
                     img = img.resize((max(width, 1), max(height, 1)), Image.Resampling.LANCZOS)
-                    
-                    # 캔버스 위에 해당 위치에 맞춰 덮어쓰기 (알파 채널 활용)
                     base_canvas.paste(img, (left, top), img)
                     image_found = True
                 except Exception:
@@ -64,10 +68,10 @@ if uploaded_file is not None:
                             image_part = slide.part.related_part(embed_id)
                             img = Image.open(io.BytesIO(image_part.blob)).convert("RGBA")
                             
-                            left = int(shape.left.inches * 96)
-                            top = int(shape.top.inches * 96)
-                            width = int(shape.width.inches * 96)
-                            height = int(shape.height.inches * 96)
+                            left = int(shape.left.inches * 96 * scale_x)
+                            top = int(shape.top.inches * 96 * scale_y)
+                            width = int(shape.width.inches * 96 * scale_x)
+                            height = int(shape.height.inches * 96 * scale_y)
                             
                             img = img.resize((max(width, 1), max(height, 1)), Image.Resampling.LANCZOS)
                             base_canvas.paste(img, (left, top), img)
@@ -75,15 +79,14 @@ if uploaded_file is not None:
                         except Exception:
                             continue
                             
-        # 이미지가 하나라도 발견된 슬라이드라면 PDF 페이지용 이미지 리스트에 추가
         if image_found:
-            # PDF 저장을 위해 투명도가 포함된 경우 RGB로 변환 (필요시)
+            # PDF 저장을 위해 RGB로 변환
             rgb_canvas = Image.new("RGB", base_canvas.size, (255, 255, 255))
-            rgb_canvas.paste(base_canvas, mask=base_canvas.split()[3]) # 알파 채널 마스크 적용
+            rgb_canvas.paste(base_canvas, mask=base_canvas.split()[3])
             slide_pil_images.append(rgb_canvas)
 
     if slide_pil_images:
-        st.write(f"총 **{len(slide_pil_images)}개**의 슬라이드가 성공적으로 합성되었습니다.")
+        st.write(f"총 **{len(slide_pil_images)}개**의 A4 슬라이드가 생성되었습니다.")
         
         try:
             pdf_buffer = io.BytesIO()
@@ -95,9 +98,9 @@ if uploaded_file is not None:
             )
             
             st.download_button(
-                label="투명 PDF 다운로드",
+                label="A4 스티커 배치 PDF 다운로드",
                 data=pdf_buffer.getvalue(),
-                file_name="converted_slides.pdf",
+                file_name="a4_sticker_layout.pdf",
                 mime="application/pdf"
             )
         except Exception as e:
