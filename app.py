@@ -26,7 +26,7 @@ if uploaded_file is not None:
         
         # 1. 일반 그림 개체 탐색
         for shape in slide.shapes:
-            if shape.has_image:
+            if shape.shape_type == 1:  # 그림(Picture) 타입
                 try:
                     image = shape.image
                     image_bytes = image.blob
@@ -38,27 +38,29 @@ if uploaded_file is not None:
                 except Exception:
                     continue
                     
-        # 2. 슬라이드 배경에 이미지가 있는 경우 탐색
+        # 2. 슬라이드 배경 및 도형 채우기 이미지 탐색 (XML 기반)
         try:
-            background = slide.background
-            if background and background.fill and background.fill.type:
-                # 배경 이미지 블롭 추출 시도
-                bg_part = background.fill._element
-                # XML에서 blip 요소(이미지 데이터)가 있는지 확인
-                blips = bg_part.xpath('.//a:blip')
+            # 슬라이드 내 모든 shape의 XML 요소를 순회하며 이미지(blip) 추출
+            for shape in slide.shapes:
+                element = shape.element
+                blips = element.xpath('.//a:blip')
                 for blip in blips:
                     embed_id = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
                     if embed_id:
-                        image_part = slide.part.related_part(embed_id)
-                        image_bytes = image_part.blob
-                        # 확장자 결정 (기본 png 또는 파트에서 유추)
-                        image_ext = image_part.content_type.split('/')[-1]
-                        if image_ext == 'jpeg':
-                            image_ext = 'jpg'
-                            
-                        slide_image_count += 1
-                        image_filename = f"slide_{slide_idx + 1}_bg_{slide_image_count}.{image_ext}"
-                        extracted_images.append((image_filename, image_bytes))
+                        try:
+                            image_part = slide.part.related_part(embed_id)
+                            image_bytes = image_part.blob
+                            image_ext = image_part.content_type.split('/')[-1]
+                            if image_ext == 'jpeg':
+                                image_ext = 'jpg'
+                                
+                            # 중복 방지를 위해 이미 추가된 바이트와 겹치지 않는 경우에만 추가
+                            if not any(img_bytes == image_bytes for _, img_bytes in extracted_images):
+                                slide_image_count += 1
+                                image_filename = f"slide_{slide_idx + 1}_element_{slide_image_count}.{image_ext}"
+                                extracted_images.append((image_filename, image_bytes))
+                        except Exception:
+                            continue
         except Exception:
             pass
 
