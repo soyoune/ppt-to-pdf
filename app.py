@@ -5,7 +5,7 @@ from PIL import Image
 from pptx import Presentation
 
 st.title("PPT 이미지 투명 PDF 변환기")
-st.write("파워포인트 각 슬라이드의 대표 이미지를 추출하여 하나의 투명 PDF로 변환해 드립니다.")
+st.write("파워포인트 각 슬라이드의 여러 이미지 요소를 하나로 합성하여 투명 PDF로 변환해 드립니다.")
 
 uploaded_file = st.file_uploader("PPTX 파일을 선택하세요", type=["pptx"])
 
@@ -16,26 +16,44 @@ if uploaded_file is not None:
     with open(ppt_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
         
-    st.success("파일 업로드 완료! 슬라이드별 이미지를 수집 중입니다...")
+    st.success("파일 업로드 완료! 슬라이드별 이미지를 합성 중입니다...")
     
     prs = Presentation(ppt_path)
-    pil_images = []
+    slide_pil_images = []
     
-    # 슬라이드별로 고유 이미지를 순서대로 수집
-    for slide_idx, slide in enumerate(prs.slides):
-        slide_img_bytes = None
+    # 파워포인트 기본 슬라이드 크기 (16:9 기준, 픽셀 단위로 환산)
+    slide_width = int(prs.slide_width.inches * 96)
+    slide_height = int(prs.slide_height.inches * 96)
+    
+    for slide in prs.slides:
+        # 투명 배경을 지원하는 빈 캔버스 생성 (RGBA 모드)
+        base_canvas = Image.new("RGBA", (slide_width, slide_height), (255, 255, 255, 0))
+        image_found = False
         
-        # 1. 일반 그림 개체 탐색
+        # 1. 일반 그림 개체 합성
         for shape in slide.shapes:
             if shape.shape_type == 1:
                 try:
-                    slide_img_bytes = shape.image.blob
-                    break
+                    img_bytes = shape.image.blob
+                    img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+                    
+                    # PPT 내 위치 및 크기 계산 (인치 또는 파이썬-pptx 단위를 픽셀로 변환)
+                    left = int(shape.left.inches * 96)
+                    top = int(shape.top.inches * 96)
+                    width = int(shape.width.inches * 96)
+                    height = int(shape.height.inches * 96)
+                    
+                    # 이미지 크기 조절
+                    img = img.resize((max(width, 1), max(height, 1)), Image.Resampling.LANCZOS)
+                    
+                    # 캔버스 위에 해당 위치에 맞춰 덮어쓰기 (알파 채널 활용)
+                    base_canvas.paste(img, (left, top), img)
+                    image_found = True
                 except Exception:
                     continue
                     
-        # 2. 그림 개체가 없다면 XML 요소에서 탐색
-        if not slide_img_bytes:
+        # 2. 그림 개체가 없다면 XML 요소 기반으로 추가 탐색
+        if not image_found:
             for shape in slide.shapes:
                 element = shape.element
                 blips = element.xpath('.//a:blip')
@@ -44,35 +62,36 @@ if uploaded_file is not None:
                     if embed_id:
                         try:
                             image_part = slide.part.related_part(embed_id)
-                            slide_img_bytes = image_part.blob
-                            break
+                            img = Image.open(io.BytesIO(image_part.blob)).convert("RGBA")
+                            
+                            left = int(shape.left.inches * 96)
+                            top = int(shape.top.inches * 96)
+                            width = int(shape.width.inches * 96)
+                            height = int(shape.height.inches * 96)
+                            
+                            img = img.resize((max(width, 1), max(height, 1)), Image.Resampling.LANCZOS)
+                            base_canvas.paste(img, (left, top), img)
+                            image_found = True
                         except Exception:
                             continue
-                if slide_img_bytes:
-                    break
-                    
-        # 해당 슬라이드에서 이미지를 찾았으면 PIL Image로 변환 후 리스트에 추가
-        if slide_img_bytes:
-            try:
-                img = Image.open(io.BytesIO(slide_img_bytes))
-                # RGBA 모드(투명도 포함)를 RGB로 변환 (PDF 저장을 위해 필요할 수 있음)
-                if img.mode in ("RGBA", "P"):
-                    img = img.convert("RGB")
-                pil_images.append(img)
-            except Exception:
-                continue
+                            
+        # 이미지가 하나라도 발견된 슬라이드라면 PDF 페이지용 이미지 리스트에 추가
+        if image_found:
+            # PDF 저장을 위해 투명도가 포함된 경우 RGB로 변환 (필요시)
+            rgb_canvas = Image.new("RGB", base_canvas.size, (255, 255, 255))
+            rgb_canvas.paste(base_canvas, mask=base_canvas.split()[3]) # 알파 채널 마스크 적용
+            slide_pil_images.append(rgb_canvas)
 
-    if pil_images:
-        st.write(f"총 **{len(pil_images)}개**의 슬라이드별 고유 이미지를 매칭했습니다.")
+    if slide_pil_images:
+        st.write(f"총 **{len(slide_pil_images)}개**의 슬라이드가 성공적으로 합성되었습니다.")
         
         try:
             pdf_buffer = io.BytesIO()
-            # 첫 번째 이미지를 기준으로 다중 페이지 PDF 저장
-            pil_images[0].save(
+            slide_pil_images[0].save(
                 pdf_buffer, 
                 format="PDF", 
                 save_all=True, 
-                append_images=pil_images[1:]
+                append_images=slide_pil_images[1:]
             )
             
             st.download_button(
