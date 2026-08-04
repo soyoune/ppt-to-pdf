@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 import io
-import img2pdf
+from PIL import Image
 from pptx import Presentation
 
 st.title("PPT 이미지 투명 PDF 변환기")
@@ -19,9 +19,9 @@ if uploaded_file is not None:
     st.success("파일 업로드 완료! 슬라이드별 이미지를 수집 중입니다...")
     
     prs = Presentation(ppt_path)
-    slide_images = []
+    pil_images = []
     
-    # 슬라이드별로 첫 번째로 발견되는 유효한 이미지를 슬라이드 매칭용으로 추출
+    # 슬라이드별로 고유 이미지를 순서대로 수집
     for slide_idx, slide in enumerate(prs.slides):
         slide_img_bytes = None
         
@@ -34,7 +34,7 @@ if uploaded_file is not None:
                 except Exception:
                     continue
                     
-        # 2. 그림 개체가 없다면 도형/배경 내부 XML 요소에서 탐색
+        # 2. 그림 개체가 없다면 XML 요소에서 탐색
         if not slide_img_bytes:
             for shape in slide.shapes:
                 element = shape.element
@@ -51,20 +51,33 @@ if uploaded_file is not None:
                 if slide_img_bytes:
                     break
                     
-        # 해당 슬라이드에서 이미지를 찾았으면 리스트에 추가
+        # 해당 슬라이드에서 이미지를 찾았으면 PIL Image로 변환 후 리스트에 추가
         if slide_img_bytes:
-            slide_images.append(slide_img_bytes)
+            try:
+                img = Image.open(io.BytesIO(slide_img_bytes))
+                # RGBA 모드(투명도 포함)를 RGB로 변환 (PDF 저장을 위해 필요할 수 있음)
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                pil_images.append(img)
+            except Exception:
+                continue
 
-    if slide_images:
-        st.write(f"총 **{len(slide_images)}개**의 슬라이드별 고유 이미지를 매칭했습니다.")
+    if pil_images:
+        st.write(f"총 **{len(pil_images)}개**의 슬라이드별 고유 이미지를 매칭했습니다.")
         
-        # 각 슬라이드 이미지를 페이지별로 담아 하나의 PDF로 변환
         try:
-            pdf_bytes = img2pdf.convert(slide_images)
+            pdf_buffer = io.BytesIO()
+            # 첫 번째 이미지를 기준으로 다중 페이지 PDF 저장
+            pil_images[0].save(
+                pdf_buffer, 
+                format="PDF", 
+                save_all=True, 
+                append_images=pil_images[1:]
+            )
             
             st.download_button(
                 label="투명 PDF 다운로드",
-                data=pdf_bytes,
+                data=pdf_buffer.getvalue(),
                 file_name="converted_slides.pdf",
                 mime="application/pdf"
             )
