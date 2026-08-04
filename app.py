@@ -5,8 +5,8 @@ import zipfile
 from PIL import Image
 from pptx import Presentation
 
-st.title("PPT 슬라이드별 투명 PSD/PNG 스티커 추출기")
-st.write("파워포인트 각 슬라이드의 여러 이미지 레이어와 투명 배경을 유지한 스티커 리소스를 추출합니다.")
+st.title("PPT 슬라이드별 투명 PDF 스티커 변환기")
+st.write("파워포인트 각 슬라이드의 여러 이미지 요소와 투명 배경을 유지한 투명 PDF를 생성합니다.")
 
 uploaded_file = st.file_uploader("PPTX 파일을 선택하세요", type=["pptx"])
 
@@ -17,7 +17,7 @@ if uploaded_file is not None:
     with open(ppt_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
         
-    st.success("파일 업로드 완료! 슬라이드별 요소를 추출 중입니다...")
+    st.success("파일 업로드 완료! 투명 PDF 파일들을 생성 중입니다...")
     
     prs = Presentation(ppt_path)
     zip_buffer = io.BytesIO()
@@ -29,11 +29,10 @@ if uploaded_file is not None:
     
     with zipfile.ZipFile(zip_buffer, "w") as zip_file:
         for slide_idx, slide in enumerate(prs.slides):
-            # A4 또는 원본 슬라이드 비율에 맞는 투명 배경 캔버스 (RGBA, 알파 0)
+            # 완전한 투명 배경 캔버스 생성 (RGBA 모드, 알파값 0)
             base_canvas = Image.new("RGBA", (slide_width, slide_height), (0, 0, 0, 0))
             image_found = False
             
-            # 각 이미지 요소를 개별 레이어처럼 다루기 위해 수집
             layer_elements = []
             
             # 1. 일반 그림 개체 수집
@@ -82,22 +81,21 @@ if uploaded_file is not None:
                 for img, pos in layer_elements:
                     base_canvas.paste(img, pos, img)
                 
-                # 포토샵/일러스트레이터에서 칼선 작업용으로 가장 선호하는 투명 레이어 구조의 PNG(PSD 대용 고품질 투명 파일)로 저장
-                # 업계 표준상 투명 PSD는 파일 구조상 복잡성이 있어, 투명도가 온전히 보존되는 고품질 포맷으로 묶는 것이 가장 안전합니다.
-                img_byte_arr = io.BytesIO()
-                base_canvas.save(img_byte_arr, format="PNG")
+                # 투명도가 유지된 상태로 PDF 바이너리로 변환 저장
+                pdf_byte_arr = io.BytesIO()
+                base_canvas.save(pdf_byte_arr, format="PDF", resolution=100.0)
                 
-                filename = f"slide_{slide_idx + 1}_transparent_layer.png"
-                zip_file.writestr(filename, img_byte_arr.getvalue())
+                filename = f"slide_{slide_idx + 1}_transparent_sticker.pdf"
+                zip_file.writestr(filename, pdf_byte_arr.getvalue())
                 success_count += 1
 
     if success_count > 0:
-        st.write(f"총 **{success_count}개**의 슬라이드가 투명 레이어 파일로 추출되었습니다.")
+        st.write(f"총 **{success_count}개**의 투명 PDF 파일이 생성되었습니다.")
         
         st.download_button(
-            label="투명 레이어 묶음 다운로드 (ZIP)",
+            label="투명 PDF 스티커 일괄 다운로드 (ZIP)",
             data=zip_buffer.getvalue(),
-            file_name="transparent_sticker_layers.zip",
+            file_name="transparent_sticker_pdfs.zip",
             mime="application/zip"
         )
     else:
