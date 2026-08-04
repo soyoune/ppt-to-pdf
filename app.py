@@ -4,9 +4,10 @@ import io
 import zipfile
 from PIL import Image
 from pptx import Presentation
+import base64
 
-st.title("PPT 슬라이드별 레이어 보존 PDF 변환기")
-st.write("파워포인트 각 슬라이드의 여러 이미지와 투명 배경을 유지하며, 개별 오브젝트가 보존된 PDF로 변환합니다.")
+st.title("PPT 슬라이드별 레이어 보존 SVG 변환기")
+st.write("파워포인트 각 슬라이드의 여러 이미지를 일러스트레이터에서 개별 수정 가능한 투명 SVG 레이아웃으로 변환합니다.")
 
 uploaded_file = st.file_uploader("PPTX 파일을 선택하세요", type=["pptx"])
 
@@ -17,7 +18,7 @@ if uploaded_file is not None:
     with open(ppt_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
         
-    st.success("파일 업로드 완료! 레이어 보존형 PDF를 생성 중입니다...")
+    st.success("파일 업로드 완료! 레이어 보존형 SVG 파일을 생성 중입니다...")
     
     prs = Presentation(ppt_path)
     zip_buffer = io.BytesIO()
@@ -29,7 +30,6 @@ if uploaded_file is not None:
     
     with zipfile.ZipFile(zip_buffer, "w") as zip_file:
         for slide_idx, slide in enumerate(prs.slides):
-            # 캔버스 생성 대신 각 슬라이드의 개별 요소들을 PDF 페이지 오브젝트 스트림으로 구성
             slide_elements = []
             
             # 1. 일반 그림 개체 수집
@@ -45,7 +45,13 @@ if uploaded_file is not None:
                         height = int(shape.height.inches * 96)
                         
                         img = img.resize((max(width, 1), max(height, 1)), Image.Resampling.LANCZOS)
-                        slide_elements.append((img, left, top))
+                        
+                        # PNG를 Base64로 인코딩하여 SVG 내부에 독립된 오브젝트로 삽입
+                        buffered = io.BytesIO()
+                        img.save(buffered, format="PNG")
+                        img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                        
+                        slide_elements.append((img_base64, left, top, width, height))
                     except Exception:
                         continue
                         
@@ -67,32 +73,34 @@ if uploaded_file is not None:
                                 height = int(shape.height.inches * 96)
                                 
                                 img = img.resize((max(width, 1), max(height, 1)), Image.Resampling.LANCZOS)
-                                slide_elements.append((img, left, top))
+                                
+                                buffered = io.BytesIO()
+                                img.save(buffered, format="PNG")
+                                img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                                
+                                slide_elements.append((img_base64, left, top, width, height))
                             except Exception:
                                 continue
                                 
             if slide_elements:
-                # 슬라이드 전체 크기의 투명 베이스 위에 배치하되, 
-                # PDF 저장 시 레이어 메타데이터 호환성을 높인 투명 PDF 포맷으로 출력
-                base_canvas = Image.new("RGBA", (slide_width, slide_height), (0, 0, 0, 0))
-                for img, left, top in slide_elements:
-                    base_canvas.paste(img, (left, top), img)
+                # SVG XML 구조 생성 (슬라이드 크기 내에 각 이미지가 독립된 <image> 태그(개별 레이어)로 배치됨)
+                svg_content = f'''<svg width="{slide_width}" height="{slide_height}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+'''
+                for img_b64, left, top, width, height in slide_elements:
+                    svg_content += f'  <image x="{left}" y="{top}" width="{width}" height="{height}" href="data:image/png;base64,{img_b64}"/>\n'
+                svg_content += '</svg>'
                 
-                pdf_byte_arr = io.BytesIO()
-                # 투명도(Alpha)를 온전히 보존하는 PDF 저장 옵션 적용
-                base_canvas.save(pdf_byte_arr, format="PDF", resolution=150.0)
-                
-                filename = f"slide_{slide_idx + 1}_layout_layered.pdf"
-                zip_file.writestr(filename, pdf_byte_arr.getvalue())
+                filename = f"slide_{slide_idx + 1}_layered_layout.svg"
+                zip_file.writestr(filename, svg_content.encode("utf-8"))
                 success_count += 1
 
     if success_count > 0:
-        st.write(f"총 **{success_count}개**의 슬라이드별 투명 레이어 PDF 파일이 생성되었습니다.")
+        st.write(f"총 **{success_count}개**의 슬라이드별 투명 SVG 레이어 파일이 생성되었습니다.")
         
         st.download_button(
-            label="레이어 보존 PDF 일괄 다운로드 (ZIP)",
+            label="투명 SVG 레이어 일괄 다운로드 (ZIP)",
             data=zip_buffer.getvalue(),
-            file_name="layered_slide_pdfs.zip",
+            file_name="layered_slide_svgs.zip",
             mime="application/zip"
         )
     else:
