@@ -46,7 +46,6 @@ if uploaded_file is not None:
                         
                         img = img.resize((max(width, 1), max(height, 1)), Image.Resampling.LANCZOS)
                         
-                        # PNG를 Base64로 인코딩하여 SVG 내부에 독립된 오브젝트로 삽입
                         buffered = io.BytesIO()
                         img.save(buffered, format="PNG")
                         img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
@@ -83,11 +82,11 @@ if uploaded_file is not None:
                                 continue
                                 
             if slide_elements:
-                # SVG XML 구조 생성 (슬라이드 크기 내에 각 이미지가 독립된 <image> 태그(개별 레이어)로 배치됨)
-                svg_content = f'''<svg width="{slide_width}" height="{slide_height}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+                # 일러스트레이터 호환성을 강화한 SVG XML 구조 (xlink 네임스페이스 추가 포함)
+                svg_content = f'''<svg width="{slide_width}" height="{slide_height}" viewBox="0 0 {slide_width} {slide_height}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
 '''
                 for img_b64, left, top, width, height in slide_elements:
-                    svg_content += f'  <image x="{left}" y="{top}" width="{width}" height="{height}" href="data:image/png;base64,{img_b64}"/>\n'
+                    svg_content += f'  <image x="{left}" y="{top}" width="{width}" height="{height}" href="data:image/png;base64,{img_b64}" xlink:href="data:image/png;base64,{img_b64}"/>\n'
                 svg_content += '</svg>'
                 
                 filename = f"slide_{slide_idx + 1}_layered_layout.svg"
